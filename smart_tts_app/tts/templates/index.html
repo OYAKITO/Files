@@ -1,0 +1,35 @@
+<!-- tts/templates/index.html -->
+<link rel="stylesheet" href="{% static 'css/style.css' %}">
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Smart TTS</title>
+</head>
+<body>
+    <h1>🎙️ Smart TTS Web App</h1>
+    <input type="text" id="ttsInput" placeholder="Type text here" style="width: 300px;">
+    <button onclick="speakText()">🔊 Speak</button>
+
+    <script>
+        async function speakText() {
+            const text = document.getElementById('ttsInput').value;
+            const response = await fetch('/api/tts/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            });
+
+            if (!response.ok) {
+                alert("TTS failed");
+                return;
+            }
+
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+        }
+    </script>
+</body>
+</html>
