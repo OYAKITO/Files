@@ -1,6 +1,8 @@
 from django.shortcuts import render
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.template.loader import get_template
+from django.conf import settings
 import json
 import io
 import tempfile
@@ -13,9 +15,88 @@ import threading
 logger = logging.getLogger(__name__)
 
 def index(request):
-    """Render the main questionnaire page"""
-    return render(request, 'questionare.html')  # Note: your template is named 'questionare.html'
+    """Render the main questionnaire page with debug info"""
+    
+    # Debug: Print template directories
+    print("=== DEBUGGING TEMPLATE ISSUE ===")
+    print("BASE_DIR:", settings.BASE_DIR)
+    print("Template DIRS:", settings.TEMPLATES[0]['DIRS'])
+    
+    # Check if template file exists
+    template_paths_to_try = [
+        'questionaire.html',
+        'tts/questionaire.html',
+        'index.html',
+    ]
+    
+    for template_path in template_paths_to_try:
+        try:
+            template = get_template(template_path)
+            print(f"✅ Found template: {template_path}")
+            return render(request, template_path)
+        except Exception as e:
+            print(f"❌ Template {template_path} not found: {e}")
+    
+    # If no template found, return a simple HTML response for now
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Template Debug</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .error { color: red; background: #ffe6e6; padding: 20px; border-radius: 5px; }
+            .debug { background: #f0f0f0; padding: 15px; border-radius: 5px; margin: 10px 0; }
+        </style>
+    </head>
+    <body>
+        <h1>🔧 Template Debug Page</h1>
+        <div class="error">
+            <h3>Template Not Found</h3>
+            <p>Django couldn't find the questionaire.html template.</p>
+        </div>
+        
+        <div class="debug">
+            <h4>Debug Information:</h4>
+            <p><strong>Looking for template:</strong> questionaire.html</p>
+            <p><strong>Template directories configured:</strong></p>
+            <ul>
+    """
+    
+    for template_dir in settings.TEMPLATES[0]['DIRS']:
+        html_content += f"<li>{template_dir}</li>"
+    
+    html_content += """
+            </ul>
+            <p><strong>Quick Fix:</strong> Make sure your questionaire.html file is in one of the above directories.</p>
+        </div>
+        
+        <div class="debug">
+            <h4>File Structure Expected:</h4>
+            <pre>
+smart_tts_app/
+├── tts/
+│   ├── templates/
+│   │   └── questionaire.html  ← Your file should be here
+│   └── static/
+│       └── tts/
+│           ├── css/  ← Rename from 'ccs' to 'css'
+│           │   └── questionaire.css
+│           └── js/
+│               └── questionaire.js
+└── manage.py
+            </pre>
+        </div>
+        
+        <a href="/admin/" style="color: blue;">Go to Admin</a> | 
+        <a href="javascript:location.reload()" style="color: blue;">Reload Page</a>
+    </body>
+    </html>
+    """
+    
+    return HttpResponse(html_content)
 
+# Rest of your TTS functions remain the same...
 @csrf_exempt
 def tts(request):
     """Primary TTS endpoint - tries multiple TTS methods for reliability"""

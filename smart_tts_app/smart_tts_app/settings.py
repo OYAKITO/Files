@@ -55,12 +55,16 @@ ROOT_URLCONF = 'smart_tts_app.urls'
 
 TEMPLATES = [
     {
-    
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'tts', 'templates')],
+        # Updated to look in _templates folder (with underscore)
+        'DIRS': [
+            BASE_DIR / 'tts' / '_templates',  # Updated for your _templates folder
+            BASE_DIR / 'templates',  # Fallback for project-level templates
+        ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
+                'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
@@ -120,6 +124,7 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     BASE_DIR / "static",
+    BASE_DIR / "tts" / "static",  # This will help Django find your TTS static files
 ]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
