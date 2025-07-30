@@ -1,0 +1,6 @@
+Django
+pyttsx3
+numpy
+gTTS
+edge-tts
+python-dotenv
