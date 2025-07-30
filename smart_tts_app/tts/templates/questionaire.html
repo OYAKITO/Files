@@ -1,0 +1,87 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Learning Questionnaire</title>
+    <link rel="stylesheet" href="{% static 'tts/css/questionnaire.css' %}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌟 Smart Learning Adventure 🌟</h1>
+            <div class="stats-container">
+                <div class="stat-item">
+                    <div class="stat-number" id="correctCount">0</div>
+                    <div class="stat-label">Correct</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="totalCount">0</div>
+                    <div class="stat-label">Total</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="streakCount">0</div>
+                    <div class="stat-label">Streak</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <div class="question-container" id="questionContainer">
+            <div class="difficulty-indicator difficulty-easy" id="difficultyIndicator">Easy</div>
+            <button class="tts-button" id="ttsButton" onclick="speakQuestion()">🔊</button>
+            <div class="question-number" id="questionNumber">Question 1</div>
+            
+            <div class="loading" id="loadingIndicator">
+                <div class="spinner"></div>
+                <div>AI is preparing your next question...</div>
+            </div>
+            
+            <div class="question-text" id="questionText">
+                Welcome! Click "Start Learning" to begin your adventure!
+            </div>
+            
+            <div class="options-container" id="optionsContainer">
+                <!-- Options will be populated by JavaScript -->
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" id="startBtn" onclick="startQuestionnaire()">
+                🚀 Start Learning
+            </button>
+            <button class="btn btn-secondary" id="nextBtn" onclick="nextQuestion()" style="display: none;">
+                Next Question ➡️
+            </button>
+            <button class="btn btn-secondary" id="retryBtn" onclick="retryQuestion()" style="display: none;">
+                🔄 Try Again
+            </button>
+        </div>
+    </div>
+
+    <!-- Explanation Modal -->
+    <div class="explanation-modal" id="explanationModal">
+        <div class="explanation-content">
+            <div class="animated-character" id="animatedCharacter">🤖</div>
+            <div class="explanation-header">
+                <span>Let me explain!</span>
+            </div>
+            <div class="explanation-text" id="explanationText">
+                <!-- AI explanation will be inserted here -->
+            </div>
+            <div class="correct-answer" id="correctAnswerText">
+                <!-- Correct answer will be shown here -->
+            </div>
+            <button class="btn btn-primary" onclick="closeExplanation()">
+                Got it! 👍
+            </button>
+        </div>
+    </div>
+
+    <script src="{% static 'tts/js/questionnaire.js' %}"></script>
+</body>
+</html>

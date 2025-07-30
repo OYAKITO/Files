@@ -3,44 +3,22 @@ from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
 import io
-import torch
-import torchaudio
-import numpy as np
-from TTS.api import TTS
+import tempfile
+import os
 import logging
+import asyncio
+import threading
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Global TTS model instance
-tts_model = None
-
-def initialize_tts():
-    """Initialize TTS model on first use"""
-    global tts_model
-    if tts_model is None:
-        try:
-            # Using Coqui TTS - a popular open-source TTS library
-            # This model is pre-trained and works well for English
-            tts_model = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False)
-            logger.info("TTS model initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize TTS model: {e}")
-            # Fallback to simpler model if the above fails
-            try:
-                tts_model = TTS(model_name="tts_models/en/ljspeech/glow-tts", progress_bar=False)
-                logger.info("Fallback TTS model initialized successfully")
-            except Exception as e2:
-                logger.error(f"Failed to initialize fallback TTS model: {e2}")
-                tts_model = None
-
 def index(request):
     """Render the main questionnaire page"""
-    return render(request, 'questionnaire.html')
+    return render(request, 'questionare.html')  # Note: your template is named 'questionare.html'
 
 @csrf_exempt
 def tts(request):
-    """Generate speech from text using open-source TTS"""
+    """Primary TTS endpoint - tries multiple TTS methods for reliability"""
     if request.method != 'POST':
         return JsonResponse({"error": "POST method required."}, status=405)
     
@@ -56,30 +34,32 @@ def tts(request):
         if len(text) > 500:
             text = text[:500]
         
-        # Initialize TTS model if not already done
-        initialize_tts()
-        
-        if tts_model is None:
-            return JsonResponse({"error": "TTS model not available"}, status=503)
-        
-        # Generate speech
         logger.info(f"Generating TTS for text: {text[:50]}...")
         
-        # Create a temporary file-like object in memory
-        audio_buffer = io.BytesIO()
+        # Try Edge TTS first (best quality)
+        try:
+            return tts_edge_internal(text)
+        except Exception as e:
+            logger.warning(f"Edge TTS failed: {e}")
         
-        # Generate speech to the buffer
-        tts_model.tts_to_file(text=text, file_path=audio_buffer)
+        # Fallback to pyttsx3 (most reliable)
+        try:
+            return tts_pyttsx3_internal(text)
+        except Exception as e:
+            logger.warning(f"pyttsx3 TTS failed: {e}")
         
-        # Reset buffer position to beginning
-        audio_buffer.seek(0)
+        # Final fallback to gTTS if available
+        try:
+            return tts_gtts_internal(text)
+        except Exception as e:
+            logger.warning(f"gTTS failed: {e}")
         
-        # Return audio response
-        response = HttpResponse(audio_buffer.getvalue(), content_type="audio/wav")
-        response['Content-Disposition'] = 'inline; filename="speech.wav"'
-        
-        logger.info("TTS generation successful")
-        return response
+        # If all fail, return browser TTS instruction
+        return JsonResponse({
+            "use_browser_tts": True,
+            "text": text,
+            "message": "Server TTS unavailable, use browser TTS"
+        })
         
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON data"}, status=400)
@@ -87,71 +67,88 @@ def tts(request):
         logger.error(f"TTS generation failed: {e}")
         return JsonResponse({"error": "TTS generation failed"}, status=500)
 
-# Alternative implementation using pyttsx3 (works offline, no GPU needed)
+@csrf_exempt
 def tts_pyttsx3(request):
-    """Alternative TTS using pyttsx3 - works completely offline"""
+    """pyttsx3 TTS endpoint - works offline"""
     if request.method != 'POST':
         return JsonResponse({"error": "POST method required."}, status=405)
     
     try:
-        import pyttsx3
-        import wave
-        import tempfile
-        import os
-        
-        # Parse JSON data
         data = json.loads(request.body)
         text = data.get("text", "").strip()
         
         if not text:
             return JsonResponse({"error": "No text provided"}, status=400)
         
-        # Limit text length
         if len(text) > 500:
             text = text[:500]
+        
+        return tts_pyttsx3_internal(text)
+        
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON data"}, status=400)
+    except Exception as e:
+        logger.error(f"pyttsx3 TTS failed: {e}")
+        return JsonResponse({"error": "TTS generation failed"}, status=500)
+
+def tts_pyttsx3_internal(text):
+    """Internal pyttsx3 TTS implementation"""
+    try:
+        import pyttsx3
         
         # Initialize pyttsx3 engine
         engine = pyttsx3.init()
         
-        # Set properties (optional)
+        # Set properties
         engine.setProperty('rate', 150)    # Speed of speech
-        engine.setProperty('volume', 0.9)  # Volume level (0.0 to 1.0)
+        engine.setProperty('volume', 0.9)  # Volume level
         
-        # Get available voices and set to a female voice if available
+        # Try to set a better voice if available
         voices = engine.getProperty('voices')
-        if len(voices) > 1:
-            engine.setProperty('voice', voices[1].id)  # Usually female voice
+        if voices and len(voices) > 1:
+            # Try to find a female voice or use the second voice
+            for voice in voices:
+                if 'female' in voice.name.lower() or 'woman' in voice.name.lower():
+                    engine.setProperty('voice', voice.id)
+                    break
+            else:
+                engine.setProperty('voice', voices[1].id)
         
         # Create temporary file
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
             temp_filename = temp_file.name
         
-        # Save speech to file
-        engine.save_to_file(text, temp_filename)
-        engine.runAndWait()
-        
-        # Read the generated audio file
-        with open(temp_filename, 'rb') as audio_file:
-            audio_data = audio_file.read()
-        
-        # Clean up temporary file
-        os.unlink(temp_filename)
-        
-        # Return audio response
-        response = HttpResponse(audio_data, content_type="audio/wav")
-        response['Content-Disposition'] = 'inline; filename="speech.wav"'
-        
-        return response
+        try:
+            # Save speech to file
+            engine.save_to_file(text, temp_filename)
+            engine.runAndWait()
+            
+            # Read the generated audio file
+            with open(temp_filename, 'rb') as audio_file:
+                audio_data = audio_file.read()
+            
+            # Return audio response
+            response = HttpResponse(audio_data, content_type="audio/wav")
+            response['Content-Disposition'] = 'inline; filename="speech.wav"'
+            
+            return response
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_filename):
+                try:
+                    os.unlink(temp_filename)
+                except:
+                    pass  # Ignore cleanup errors
         
     except ImportError:
-        return JsonResponse({"error": "pyttsx3 not installed. Please install it with: pip install pyttsx3"}, status=503)
+        raise Exception("pyttsx3 not installed. Install with: pip install pyttsx3")
     except Exception as e:
-        logger.error(f"pyttsx3 TTS generation failed: {e}")
-        return JsonResponse({"error": "TTS generation failed"}, status=500)
+        raise Exception(f"pyttsx3 generation failed: {e}")
 
-# Simple fallback using browser's built-in TTS (client-side)
-def tts_browser_fallback(request):
-    """Return JavaScript code for client-side TTS as fallback"""
+@csrf_exempt
+def tts_edge(request):
+    """Edge TTS endpoint - high quality cloud TTS"""
     if request.method != 'POST':
         return JsonResponse({"error": "POST method required."}, status=405)
     
@@ -162,12 +159,127 @@ def tts_browser_fallback(request):
         if not text:
             return JsonResponse({"error": "No text provided"}, status=400)
         
-        # Return instruction to use browser TTS
-        return JsonResponse({
-            "use_browser_tts": True,
-            "text": text,
-            "message": "Using browser TTS as fallback"
-        })
+        if len(text) > 500:
+            text = text[:500]
+        
+        return tts_edge_internal(text)
+        
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON data"}, status=400)
+    except Exception as e:
+        logger.error(f"Edge TTS failed: {e}")
+        return JsonResponse({"error": "Edge TTS generation failed"}, status=500)
+
+def tts_edge_internal(text):
+    """Internal Edge TTS implementation"""
+    try:
+        import edge_tts
+        
+        # Run async Edge TTS in a thread
+        def run_edge_tts():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(generate_edge_tts(text))
+            finally:
+                loop.close()
+        
+        # Run in thread to avoid blocking
+        audio_data = run_edge_tts()
+        
+        if audio_data:
+            response = HttpResponse(audio_data, content_type="audio/mp3")
+            response['Content-Disposition'] = 'inline; filename="speech.mp3"'
+            return response
+        else:
+            raise Exception("No audio data generated")
+            
+    except ImportError:
+        raise Exception("edge-tts not installed. Install with: pip install edge-tts")
+    except Exception as e:
+        raise Exception(f"Edge TTS generation failed: {e}")
+
+async def generate_edge_tts(text):
+    """Async function to generate Edge TTS"""
+    try:
+        import edge_tts
+        
+        # Use a good English voice
+        voice = "en-US-AriaNeural"  # Female voice
+        # Alternative voices: "en-US-JennyNeural", "en-US-GuyNeural"
+        
+        communicate = edge_tts.Communicate(text, voice)
+        
+        # Generate audio data
+        audio_data = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data += chunk["data"]
+        
+        return audio_data
         
     except Exception as e:
-        return JsonResponse({"error": "Failed to process request"}, status=500)
+        logger.error(f"Async Edge TTS failed: {e}")
+        return None
+
+def tts_gtts_internal(text):
+    """Internal Google Text-to-Speech implementation"""
+    try:
+        from gtts import gTTS
+        
+        # Create gTTS object
+        tts = gTTS(text=text, lang='en', slow=False)
+        
+        # Save to memory buffer
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        
+        # Return audio response
+        response = HttpResponse(audio_buffer.getvalue(), content_type="audio/mp3")
+        response['Content-Disposition'] = 'inline; filename="speech.mp3"'
+        
+        return response
+        
+    except ImportError:
+        raise Exception("gTTS not installed. Install with: pip install gTTS")
+    except Exception as e:
+        raise Exception(f"gTTS generation failed: {e}")
+
+@csrf_exempt
+def tts_status(request):
+    """Check TTS availability status"""
+    status = {
+        "pyttsx3": False,
+        "edge_tts": False,
+        "gtts": False,
+        "available_engines": []
+    }
+    
+    # Check pyttsx3
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        engine.stop()
+        status["pyttsx3"] = True
+        status["available_engines"].append("pyttsx3")
+    except:
+        pass
+    
+    # Check edge-tts
+    try:
+        import edge_tts
+        status["edge_tts"] = True
+        status["available_engines"].append("edge_tts")
+    except:
+        pass
+    
+    # Check gTTS
+    try:
+        from gtts import gTTS
+        status["gtts"] = True
+        status["available_engines"].append("gtts")
+    except:
+        pass
+    
+    return JsonResponse(status)
